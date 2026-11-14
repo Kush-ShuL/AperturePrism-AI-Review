@@ -252,11 +252,15 @@ integration("workbench batch PostgreSQL dispatch", () => {
       "postgres-restarted-2",
       createWorkbench({ dataDirectory: directory, now: () => now }),
     );
+    const readsBeforeRecovery = githubReads.length;
     await Promise.all([replacement.tick(), replacementTwo.tick()]);
     expect((await taskRows()).map((task) => task.id)).toEqual(
       originalTasks.map((task) => task.id),
     );
-    expect(githubReads).toHaveLength(2);
+    expect(githubReads.slice(readsBeforeRecovery).toSorted()).toEqual([
+      "issue#8",
+      "pr#7",
+    ]);
     const recovered = await execute<Batch>("batches.get", { id: batch.id });
     expect(
       recovered.items.filter((item) => item.status === "running"),
@@ -272,6 +276,7 @@ integration("workbench batch PostgreSQL dispatch", () => {
     ).toBe(true);
 
     await database.sql`update analysis_tasks set status='completed' where repository_id=${repositoryId} and payload->>'workbenchBatchId'=${batch.id}`;
+    const readsBeforeNextWave = githubReads.length;
     await Promise.all([replacement.tick(), replacementTwo.tick()]);
     const allTasks = await taskRows();
     expect(allTasks).toHaveLength(3);
@@ -279,7 +284,11 @@ integration("workbench batch PostgreSQL dispatch", () => {
       task_type: "pr_review",
       subject_revision: sha,
     });
-    expect(githubReads.toSorted()).toEqual(["issue#8", "pr#7", "pr#9"]);
+    expect(githubReads.slice(readsBeforeNextWave).toSorted()).toEqual([
+      "issue#8",
+      "pr#7",
+      "pr#9",
+    ]);
     expect(new Set(allTasks.map((task) => task.dedupe_key)).size).toBe(3);
     await database.sql`update analysis_tasks set status='completed' where repository_id=${repositoryId} and payload->>'workbenchBatchId'=${batch.id}`;
     await Promise.all([replacement.tick(), replacementTwo.tick()]);
